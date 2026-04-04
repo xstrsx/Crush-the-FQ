@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <title>捏爆“马虫” - 3D手势找不同</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            font-family: 'Microsoft YaHei', sans-serif;
+            user-select: none;
+            touch-action: none;
+        }
+        
+        /* 顶部 UI 和标题动画 */
+        #ui {
+            position: absolute;
+            top: 0;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        .title {
+            color: #ffffff;
+            font-size: 2.5em;
+            font-weight: bold;
+            text-shadow: 0 4px 15px rgba(0, 0, 0, 0.8);
+            margin-top: 20px;
+            animation: breathe 2s infinite ease-in-out;
+            letter-spacing: 2px;
+        }
+        
+        /* 强调“爆”字 */
+        .title span {
+            font-size: 1.6em;
+            color: #ff3b30;
+            text-shadow: 0 0 20px rgba(255, 59, 48, 0.8);
+        }
+
+        @keyframes breathe {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.08); }
+        }
+
+        /* 状态与加载层 */
+        #loading {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+            color: white;
+            text-align: center;
+        }
+
+        #startBtn {
+            padding: 15px 40px;
+            font-size: 1.5em;
+            font-weight: bold;
+            color: white;
+            background: linear-gradient(135deg, #ff3b30, #ff9500);
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 5px 15px rgba(255, 59, 48, 0.5);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        #startBtn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 8px 20px rgba(255, 59, 48, 0.7);
+        }
+
+        #loadingText {
+            display: none;
+            font-size: 1.2em;
+            color: #aaa;
+            margin-top: 20px;
+            line-height: 1.5;
+        }
+
+        #debug-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: #00ff00;
+            background: rgba(0,0,0,0.6);
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 14px;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* 关键修复：绝不能用 display:none，否则 MediaPipe 读不到画面尺寸导致静默崩溃 */
+        .input_video {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+            z-index: -1;
+        }
+    </style>
+
+    <!-- 仅保留 MediaPipe Hands 核心库 -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <!-- ES Module 导入配置 -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.158.0/build/three.module.js",
+                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="ui">
+        <div class="title">捏<span>爆</span>“马虫”</div>
+    </div>
+
+    <div id="loading">
+        <h1 style="margin-bottom: 40px;">3D 手势找不同</h1>
+        <button id="startBtn">开始游戏</button>
+        <div id="loadingText">正在请求摄像头权限并加载 AI 模型...<br>请允许访问摄像头（若黑屏请确保处于 HTTPS 环境）</div>
+    </div>
+
+    <div id="debug-panel">手势状态: 等待中...</div>
+    
+    <!-- 关键修复：必须加上 muted（静音），否则移动端浏览器会严格拦截视频的自动播放 -->
+    <video class="input_video" autoplay playsinline muted></video>
+
+    <!-- 主逻辑脚本 -->
+    <script type="module">
+        import * as THREE from 'three';
+        import * as CANNON from 'cannon-es';
+
+        // ================= 全局变量 =================
+        let scene, camera, renderer, world, raycaster;
+        let cubes = [];              
+        let explosionParticles =[]; 
+        let hands;                   // MediaPipe Hands 实例
+        
+        let cursorMesh;              
+        let mouse = new THREE.Vector2();
+        let hoveredCube = null;       
+        let isFist = false;           
+        let wasFist = false;          
+        let firstFrame = true;        
+        let level = 1;                
+        let isAnimatingLevel = false; 
+
+        // ================= 1. 原生摄像头调用逻辑 =================
+        async function initCamera() {
+            const videoElement = document.querySelector('.input_video');
+            
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('您的浏览器不支持摄像头，或当前未处于 HTTPS/localhost 环境下，无法调用摄像头！');
+                throw new Error('getUserMedia is not supported');
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'user', 
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    },
+                    audio: false
+                });
+                
+                videoElement.srcObject = stream;
+                
+                return new Promise((resolve) => {
+                    videoElement.onloadedmetadata = () => {
+                        videoElement.play();
+                        resolve();
+                    };
+                });
+            } catch (err) {
+                alert('摄像头权限被拒绝或被占用！错误信息: ' + err.message);
+                throw err;
+            }
+        }
+
+        // ================= 2. 初始化 3D 引擎 =================
+        function initEngine() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a1a);
+            scene.fog = new THREE.Fog(0x1a1a1a, 30, 80);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 25, 40);
+            camera.lookAt(0, 5, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+            dirLight.position.set(15, 30, 15);
+            dirLight.castShadow = true;
+            dirLight.shadow.camera.left = -30;
+            dirLight.shadow.camera.right = 30;
+            dirLight.shadow.camera.top = 30;
+            dirLight.shadow.camera.bottom = -30;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            raycaster = new THREE.Raycaster();
+            cursorMesh = new THREE.Mesh(
+                new THREE.SphereGeometry(0.6, 16, 16),
+                new THREE.MeshBasicMaterial({ color: 0x00ff00, depthTest: false })
+            );
+            cursorMesh.renderOrder = 999;
+            scene.add(cursorMesh);
+
+            const gridHelper = new THREE.GridHelper(80, 40, 0x444444, 0x222222);
+            gridHelper.position.y = 0.01;
+            scene.add(gridHelper);
+
+            world = new CANNON.World({
+                gravity: new CANNON.Vec3(0, -40, 0),
+            });
+            world.broadphase = new CANNON.SAPBroadphase(world);
+            
+            const defaultMaterial = new CANNON.Material('default');
+            const contactMaterial = new CANNON.ContactMaterial(defaultMaterial, defaultMaterial, {
+                friction: 0.5,
+                restitution: 0.3
+            });
+            world.addContactMaterial(contactMaterial);
+
+            const floorShape = new CANNON.Plane();
+            const floorBody = new CANNON.Body({ mass: 0, material: defaultMaterial });
+            floorBody.addShape(floorShape);
+            floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+            world.addBody(floorBody);
+
+            const floorMesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(100, 100),
+                new THREE.MeshStandardMaterial({ color: 0x2a2a2a })
+            );
+            floorMesh.rotation.x = -Math.PI / 2;
+            floorMesh.receiveShadow = true;
+            scene.add(floorMesh);
+
+            const wallShape = new CANNON.Box(new CANNON.Vec3(40, 30, 1));
+            const walls =[
+                { pos:[0, 15, -20] }, 
+                { pos:[0, 15, 15] },  
+                { pos:[-18, 15, 0], rot:[0, Math.PI/2, 0] }, 
+                { pos:[18, 15, 0], rot:[0, Math.PI/2, 0] }    
+            ];
+            walls.forEach(w => {
+                const wallBody = new CANNON.Body({ mass: 0, material: defaultMaterial });
+                wallBody.addShape(wallShape);
+                wallBody.position.set(...w.pos);
+                if (w.rot) wallBody.quaternion.setFromEuler(...w.rot);
+                world.addBody(wallBody);
+            });
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        // ================= 3. 生成纹理与关卡 =================
+        function createTextTexture(text) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#f0f0f0';
+            ctx.fillRect(0, 0, 256, 256);
+            ctx.lineWidth = 15;
+            ctx.strokeStyle = '#cccccc';
+            ctx.strokeRect(8, 8, 240, 240);
+            ctx.fillStyle = '#111111';
+            ctx.font = 'bold 100px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, 128, 128);
+            const texture = new THREE.CanvasTexture(canvas);
+            if (renderer) texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            return texture;
+        }
+
+        const texNormal = createTextTexture('冯强');
+        const texTarget = createTextTexture('马虫');
+        const cubeGeometry = new THREE.BoxGeometry(3, 3, 3);
+
+        function generateLevel() {
+            isAnimatingLevel = true;
+            cubes.forEach(c => {
+                world.removeBody(c.body);
+                scene.remove(c.mesh);
+            });
+            cubes =[];
+            hoveredCube = null;
+
+            const count = Math.min(15 + level * 3, 45); 
+            const targetIndex = Math.floor(Math.random() * count);
+            let spawned = 0;
+
+            const spawnInterval = setInterval(() => {
+                if (spawned >= count) {
+                    clearInterval(spawnInterval);
+                    isAnimatingLevel = false;
+                    return;
+                }
+
+                const isTarget = (spawned === targetIndex);
+                const material = new THREE.MeshStandardMaterial({ 
+                    map: isTarget ? texTarget : texNormal,
+                    roughness: 0.6
+                });
+
+                const mesh = new THREE.Mesh(cubeGeometry, material);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                scene.add(mesh);
+
+                const shape = new CANNON.Box(new CANNON.Vec3(1.5, 1.5, 1.5));
+                const body = new CANNON.Body({
+                    mass: 5, shape: shape, linearDamping: 0.1, angularDamping: 0.1
+                });
+                
+                const spread = 25;
+                body.position.set(
+                    (Math.random() - 0.5) * spread,
+                    30 + Math.random() * 10,
+                    (Math.random() - 0.5) * spread
+                );
+                body.velocity.set((Math.random() - 0.5) * 5, -10, (Math.random() - 0.5) * 5);
+                body.angularVelocity.set(Math.random() * 5, Math.random() * 5, Math.random() * 5);
+
+                world.addBody(body);
+                cubes.push({ mesh: mesh, body: body, isTarget: isTarget, isShattered: false });
+
+                spawned++;
+            }, 50);
+        }
+
+        // ================= 4. MediaPipe 手势识别集成 =================
+        function initMediaPipe() {
+            const videoElement = document.querySelector('.input_video');
+            
+            hands = new window.Hands({locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+            }});
+            
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.7,
+                minTrackingConfidence: 0.7
+            });
+            
+            hands.onResults(onHandsResult);
+
+            async function processVideo() {
+                if (videoElement.readyState >= 2) { 
+                    try {
+                        await hands.send({image: videoElement});
+                    } catch (e) {
+                        console.error("AI 识别帧错误: ", e);
+                    }
+                }
+                requestAnimationFrame(processVideo);
+            }
+            processVideo();
+        }
+
+        function checkFist(landmarks) {
+            const wrist = landmarks[0];
+            let curledCount = 0;
+            const tips =[8, 12, 16, 20];
+            const mcps =[5, 9, 13, 17];
+            
+            for (let i = 0; i < 4; i++) {
+                const tipDist = new THREE.Vector3(landmarks[tips[i]].x, landmarks[tips[i]].y, landmarks[tips[i]].z)
+                    .distanceTo(new THREE.Vector3(wrist.x, wrist.y, wrist.z));
+                const mcpDist = new THREE.Vector3(landmarks[mcps[i]].x, landmarks[mcps[i]].y, landmarks[mcps[i]].z)
+                    .distanceTo(new THREE.Vector3(wrist.x, wrist.y, wrist.z));
+                
+                if (tipDist < mcpDist) curledCount++;
+            }
+            return curledCount >= 3;
+        }
+
+        function onHandsResult(results) {
+            if (firstFrame) {
+                document.getElementById('loading').style.display = 'none';
+                generateLevel();
+                firstFrame = false;
+            }
+
+            const debugPanel = document.getElementById('debug-panel');
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                isFist = checkFist(landmarks);
+                
+                const aimPoint = landmarks[9];
+                
+                mouse.x = -((aimPoint.x - 0.5) * 3.0); 
+                mouse.y = -((aimPoint.y - 0.5) * 3.0) - 0.2;
+                
+                mouse.x = Math.max(-1, Math.min(1, mouse.x));
+                mouse.y = Math.max(-1, Math.min(1, mouse.y));
+
+                debugPanel.innerText = `手势状态: ${isFist ? '握拳 (确认)' : '张开 (选择)'}`;
+                debugPanel.style.color = isFist ? '#ff3b30' : '#00ff00';
+            } else {
+                debugPanel.innerText = `手势状态: 未检测到手`;
+                debugPanel.style.color = '#aaaaaa';
+            }
+        }
+
+        // ================= 5. 交互与动画 =================
+        function handleInteraction() {
+            if (isAnimatingLevel) return;
+
+            raycaster.setFromCamera(mouse, camera);
+            cursorMesh.material.color.setHex(isFist ? 0xff0000 : 0x00ff00);
+            cursorMesh.scale.setScalar(isFist ? 0.7 : 1.0);
+
+            if (hoveredCube && !hoveredCube.isShattered) {
+                hoveredCube.mesh.material.emissive.setHex(0x000000);
+            }
+
+            const activeMeshes = cubes.filter(c => !c.isShattered).map(c => c.mesh);
+            const intersects = raycaster.intersectObjects(activeMeshes);
+
+            if (intersects.length > 0) {
+                const hit = intersects[0];
+                cursorMesh.position.copy(hit.point);
+                hoveredCube = cubes.find(c => c.mesh === hit.object);
+                
+                if (!isFist && hoveredCube) {
+                    hoveredCube.mesh.material.emissive.setHex(0x333333);
+                }
+            } else {
+                hoveredCube = null;
+                raycaster.ray.at(30, cursorMesh.position);
+            }
+
+            if (isFist && !wasFist && hoveredCube) {
+                triggerClick(hoveredCube);
+            }
+            wasFist = isFist;
+        }
+
+        function triggerWrong(cube) {
+            cube.body.velocity.y = 15;
+            cube.body.angularVelocity.set(
+                (Math.random()-0.5)*10, (Math.random()-0.5)*10, (Math.random()-0.5)*10
+            );
+            cube.mesh.material.color.setHex(0xff3333);
+            setTimeout(() => {
+                if (cube && cube.mesh && cube.mesh.material) {
+                    cube.mesh.material.color.setHex(0xffffff);
+                }
+            }, 500);
+        }
+
+        // ================= 核心修改点：吸水六面鼓起撑破 与 炫彩爆破粒子 =================
+        function triggerCorrect(cube) {
+            isAnimatingLevel = true;
+            cube.isShattered = true; 
+
+            // 1. 立刻从物理世界移除，使其悬空并停止受重力和碰撞影响
+            world.removeBody(cube.body);
+
+            const startSwellTime = Date.now();
+            const swellDuration = 800; // 动画持续时间 0.8 秒，充分展示变形张力
+
+            // ======= 核心实现：将低面数 Box 替换为 16x16x16 高分段 Box，以便进行六面突起圆润变形 =======
+            const baseSize = 3;
+            const highSegGeom = new THREE.BoxGeometry(baseSize, baseSize, baseSize, 16, 16, 16);
+            cube.mesh.geometry.dispose(); 
+            cube.mesh.geometry = highSegGeom;
+
+            const positionAttr = highSegGeom.attributes.position;
+            const originalPositions = [];
+            const targetPositions =[];
+            const v = new THREE.Vector3();
+
+            // 预计算顶点形变的终点位置（将顶点推向一个半径为 2.5 的球面上）
+            // 原先正方体面上中心点距离圆心为 1.5，会被推到 2.5，造成六个面大幅度向外鼓起的效果
+            for(let i=0; i < positionAttr.count; i++) {
+                v.fromBufferAttribute(positionAttr, i);
+                originalPositions.push(v.clone());
+                targetPositions.push(v.clone().normalize().multiplyScalar(2.5));
+            }
+
+            function swellAnimation() {
+                const now = Date.now();
+                let progress = (now - startSwellTime) / swellDuration;
+                if(progress > 1) progress = 1;
+
+                // 缓动曲线：先积蓄力量（慢），然后极速膨胀（快），模拟吸水到极限即将撑破的物理张力
+                const easeProgress = Math.pow(progress, 3);
+
+                if (progress < 1) {
+                    // 形变：顶点逐步从正方体插值平滑凸起成球体
+                    for(let i=0; i < positionAttr.count; i++) {
+                        const orig = originalPositions[i];
+                        const targ = targetPositions[i];
+                        v.lerpVectors(orig, targ, easeProgress);
+                        positionAttr.setXYZ(i, v.x, v.y, v.z);
+                    }
+                    positionAttr.needsUpdate = true;
+                    highSegGeom.computeVertexNormals(); // 动态更新法线，保持六面鼓起时光照圆润平滑
+
+                    // 整体体积倍增
+                    const s = 1 + easeProgress * 1.5; 
+                    cube.mesh.scale.set(s, s, s);
+                    
+                    // 材质变亮，透出“高能预警”的红热光芒
+                    const cVal = 1 - easeProgress;
+                    cube.mesh.material.color.setRGB(1, cVal, cVal);
+                    cube.mesh.material.emissive.setRGB(easeProgress * 2.0, easeProgress * 0.3, 0);
+
+                    requestAnimationFrame(swellAnimation);
+                } else {
+                    // ======= 撑破临界点！触发炫彩爆炸！ =======
+                    scene.remove(cube.mesh);
+                    highSegGeom.dispose();
+
+                    // 赛博炫彩高饱和度粒子参数
+                    const colors =[0xff0044, 0xff8800, 0xffdd00, 0x00ffcc, 0x00aaff, 0xaa00ff, 0xffffff];
+                    const sphereGeom = new THREE.SphereGeometry(0.3, 12, 12);
+                    const boxGeom = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+
+                    // 生成 80 个绚丽混合形状的高亮发光碎片
+                    for (let i = 0; i < 80; i++) { 
+                        const randomColor = colors[Math.floor(Math.random() * colors.length)];
+                        const isSphere = Math.random() > 0.5;
+                        const fragMat = new THREE.MeshStandardMaterial({
+                            color: randomColor, 
+                            emissive: randomColor, 
+                            emissiveIntensity: 2.0, // 刺眼的炫彩光芒
+                            roughness: 0.1
+                        });
+
+                        const p = new THREE.Mesh(isSphere ? sphereGeom : boxGeom, fragMat);
+                        p.position.copy(cube.mesh.position);
+                        
+                        // 初始分布在刚撑破的巨大球体轮廓内部
+                        const radiusOffset = Math.random() * 4;
+                        const theta = Math.random() * Math.PI * 2;
+                        const phi = Math.acos((Math.random() * 2) - 1);
+                        p.position.x += radiusOffset * Math.sin(phi) * Math.cos(theta);
+                        p.position.y += radiusOffset * Math.sin(phi) * Math.sin(theta);
+                        p.position.z += radiusOffset * Math.cos(phi);
+                        
+                        scene.add(p);
+
+                        // 夸张的四面八方猛烈散射速度
+                        const speed = Math.random() * 60 + 20;
+                        const velocity = new THREE.Vector3(
+                            Math.sin(phi) * Math.cos(theta),
+                            Math.sin(phi) * Math.sin(theta),
+                            Math.cos(phi)
+                        ).multiplyScalar(speed);
+                        velocity.y += 15; // 带有向上炸升的趋势，表现爆发力
+
+                        // 随机寿命，让粒子消失有层次感
+                        explosionParticles.push({ mesh: p, velocity: velocity, life: 1.5 + Math.random() * 0.8 });
+                    }
+
+                    // 延迟切关
+                    setTimeout(() => {
+                        level++;
+                        generateLevel();
+                    }, 2000);
+                }
+            }
+            
+            swellAnimation();
+        }
+
+        function triggerClick(cube) {
+            if (cube.isTarget) triggerCorrect(cube);
+            else triggerWrong(cube);
+        }
+
+        // ================= 6. 主渲染循环 =================
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = Math.min(clock.getDelta(), 0.1);
+
+            world.step(1 / 60, dt, 3);
+
+            cubes.forEach(c => {
+                if (!c.isShattered) {
+                    c.mesh.position.copy(c.body.position);
+                    c.mesh.quaternion.copy(c.body.quaternion);
+                }
+            });
+
+            for (let i = explosionParticles.length - 1; i >= 0; i--) {
+                const p = explosionParticles[i];
+                p.mesh.position.addScaledVector(p.velocity, dt);
+                p.velocity.y -= 60 * dt; 
+                p.mesh.rotation.x += p.velocity.y * 0.02;
+                p.mesh.rotation.y += p.velocity.x * 0.02;
+                p.mesh.scale.multiplyScalar(0.92);
+                p.life -= dt;
+                if (p.life <= 0) {
+                    scene.remove(p.mesh);
+                    explosionParticles.splice(i, 1);
+                }
+            }
+
+            handleInteraction();
+            renderer.render(scene, camera);
+        }
+
+        // ================= 7. 启动入口 =================
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            const btn = document.getElementById('startBtn');
+            const loadingText = document.getElementById('loadingText');
+            
+            btn.style.display = 'none';
+            loadingText.style.display = 'block';
+
+            try {
+                await initCamera();
+                initEngine();
+                initMediaPipe();
+                animate();
+            } catch (error) {
+                btn.style.display = 'block';
+                loadingText.style.display = 'none';
+                console.error("初始化失败:", error);
+            }
+        });
+
+    </script>
+</body>
+</html>
