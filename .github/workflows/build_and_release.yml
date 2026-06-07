@@ -23,7 +23,7 @@ on:
 env:
   FLUTTER_VERSION: "3.32.7" # 使用当前最新稳定版
   APP_NAME: "crush_the_fq"
-  RELEASE_TITLE: "Flutter 重构版 - 捏爆"马虫""
+  RELEASE_TITLE: 'Flutter 重构版 - 捏爆"马虫"'
   RELEASE_BODY: "使用 Flutter 重构"
 
 # ---------- 权限配置（确保 Release 创建和附件上传权限） ----------
