@@ -32,13 +32,14 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
-# Fix: hand_detection → opencv_dart C++ native code uses standard <coroutine>.
-# VS 2022+ STL rejects the deprecated /await TS; /std:c++20 enables C++20 coroutines.
-# Use CMAKE_CXX_FLAGS (global) instead of add_compile_options (directory-scoped)
-# to ensure the flag reaches all plugin subdirectories added by generated_plugins.cmake.
+# Fix: VS 2022+ (MSVC 14.5x) STL rejects <experimental/coroutine> with a hard
+# static_assert (STL1011). The deprecated /await TS and experimental headers are
+# superseded by C++20 <coroutine>. The permission_handler_windows plugin (and
+# potentially others) still pull in the old header.
+# Solution: /std:c++20 enables standard coroutines; the _SILENCE_ define suppresses
+# the STL1011 assertion for any code that still #includes the experimental header.
 if(MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++20")
-  # Strip any stale /await that a plugin might inject — it conflicts with /std:c++20
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++20 /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS")
   string(REPLACE "/await" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 endif()
 
