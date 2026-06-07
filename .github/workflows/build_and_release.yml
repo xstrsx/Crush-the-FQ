@@ -2,8 +2,9 @@
 # 捏爆"马虫" - Flutter 全平台自动构建 + GitHub Release 发布流水线
 # =============================================================================
 # 触发条件：向 main 分支推送代码或合并 PR 后自动触发
-# 构建目标：Android / iOS / Windows / macOS / Linux / Web
-# 产物处理：上传至工件 (Artifacts) → 自动创建 GitHub Release 并附加所有包
+# 构建目标：Android / iOS / Windows / macOS / Linux (5 平台)
+# 注意：Web 平台因 hand_detection 包不支持 web 而移除，原 index.html 替代
+# 产物处理：上传至工件 → 自动创建 GitHub Release 并附加所有包
 # =============================================================================
 
 name: 🚀 全平台构建 & 自动发布
@@ -16,28 +17,25 @@ on:
   pull_request:
     branches:
       - main
-  # 允许手动触发（用于调试）
   workflow_dispatch:
 
 # ---------- 全局环境变量 ----------
 env:
-  FLUTTER_VERSION: "3.44.1" # 匹配本地开发环境（Flutter 3.44.1 / Dart 3.12.1）
+  FLUTTER_VERSION: "3.44.1"
   APP_NAME: "crush_the_fq"
   RELEASE_TITLE: 'Flutter 重构版 - 捏爆"马虫"'
   RELEASE_BODY: "使用 Flutter 重构"
 
-# ---------- 权限配置（确保 Release 创建和附件上传权限） ----------
+# ---------- 权限配置 ----------
 permissions:
-  contents: write      # 创建 Release + 上传附件
-  actions: read        # 读取工作流状态
-  pull-requests: read  # PR 读取
+  contents: write
+  actions: read
+  pull-requests: read
 
-# =============================================================================
-# 构建任务矩阵
 # =============================================================================
 jobs:
   # ============================
-  # 1. Android APK 构建
+  # 1. Android APK
   # ============================
   build-android:
     name: 🤖 Android APK
@@ -70,7 +68,7 @@ jobs:
         run: |
           mkdir -p build/outputs/artifacts
           cp build/app/outputs/flutter-apk/app-release.apk \
-             build/outputs/artifacts/${APP_NAME}-android-v1.0.0+${{ github.run_number }}.apk
+             "build/outputs/artifacts/${{ env.APP_NAME }}-android-v1.0.0+${{ github.run_number }}.apk"
 
       - name: 📤 上传工件
         uses: actions/upload-artifact@v4
@@ -79,13 +77,8 @@ jobs:
           path: build/outputs/artifacts/*.apk
           retention-days: 30
 
-      - name: ✅ 输出构建信息
-        run: |
-          echo "✅ Android APK 构建完成"
-          ls -lh build/outputs/artifacts/
-
   # ============================
-  # 2. iOS 打包（macOS 运行器）
+  # 2. iOS App (未签名)
   # ============================
   build-ios:
     name: 🍎 iOS App
@@ -106,7 +99,7 @@ jobs:
       - name: 📦 安装依赖
         run: flutter pub get
 
-      - name: 🔨 构建 iOS (无签名 .app 包)
+      - name: 🔨 构建 iOS (无签名)
         run: |
           flutter build ios \
             --release \
@@ -114,12 +107,11 @@ jobs:
             --build-name=1.0.0 \
             --build-number=${{ github.run_number }}
 
-      - name: 📦 打包为 .zip（模拟 .ipa 交付）
+      - name: 📋 打包产物
         run: |
           mkdir -p build/outputs/artifacts
           cd build/ios/iphoneos
-          zip -r ../../outputs/artifacts/${APP_NAME}-ios-v1.0.0+${{ github.run_number }}.zip Runner.app
-          cd ../../..
+          zip -r "../../outputs/artifacts/${{ env.APP_NAME }}-ios-v1.0.0+${{ github.run_number }}.zip" Runner.app
 
       - name: 📤 上传工件
         uses: actions/upload-artifact@v4
@@ -128,13 +120,8 @@ jobs:
           path: build/outputs/artifacts/*.zip
           retention-days: 30
 
-      - name: ✅ 输出构建信息
-        run: |
-          echo "✅ iOS App 构建完成（未签名，需手动签名后安装）"
-          ls -lh build/outputs/artifacts/
-
   # ============================
-  # 3. Windows 桌面构建
+  # 3. Windows 便携包
   # ============================
   build-windows:
     name: 🪟 Windows 安装包
@@ -155,22 +142,29 @@ jobs:
       - name: 📦 安装依赖
         run: flutter pub get
 
-      - name: 🔨 构建 Windows (便携包 + MSIX)
-        run: |
-          flutter build windows --release
+      - name: 🔨 构建 Windows (Release)
+        run: flutter build windows --release
 
       - name: 📋 收集产物
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path build/outputs/artifacts
+          $artifactsDir = "build/outputs/artifacts"
+          New-Item -ItemType Directory -Force -Path $artifactsDir
 
-          # 便携包（直接运行的 .exe 所在目录）
-          Compress-Archive `
-            -Path build/windows/x64/runner/Release/* `
-            -DestinationPath build/outputs/artifacts/$env:APP_NAME-windows-portable-v1.0.0+${{ github.run_number }}.zip
+          $appName = "${{ env.APP_NAME }}"
+          $runNumber = "${{ github.run_number }}"
+          $zipName = "${appName}-windows-portable-v1.0.0+${runNumber}.zip"
+          $zipPath = Join-Path $artifactsDir $zipName
+          $sourcePath = "build/windows/x64/runner/Release/*"
 
-        env:
-          APP_NAME: ${{ env.APP_NAME }}
+          Write-Host "打包 Windows 产物..."
+          Write-Host "  源目录: $sourcePath"
+          Write-Host "  目标文件: $zipPath"
+
+          Compress-Archive -Path $sourcePath -DestinationPath $zipPath
+
+          Write-Host "产物列表:"
+          Get-ChildItem $artifactsDir | Format-Table Name, Length
 
       - name: 📤 上传工件
         uses: actions/upload-artifact@v4
@@ -179,14 +173,8 @@ jobs:
           path: build/outputs/artifacts/*.zip
           retention-days: 30
 
-      - name: ✅ 输出构建信息
-        shell: pwsh
-        run: |
-          echo "✅ Windows 构建完成"
-          Get-ChildItem build/outputs/artifacts/
-
   # ============================
-  # 4. macOS 桌面构建
+  # 4. macOS 桌面
   # ============================
   build-macos:
     name: 🍏 macOS DMG
@@ -208,15 +196,13 @@ jobs:
         run: flutter pub get
 
       - name: 🔨 构建 macOS
-        run: |
-          flutter build macos --release
+        run: flutter build macos --release
 
-      - name: 📋 创建 .app 压缩包
+      - name: 📋 打包产物
         run: |
           mkdir -p build/outputs/artifacts
           cd build/macos/Build/Products/Release
-          zip -r ../../../../outputs/artifacts/${APP_NAME}-macos-v1.0.0+${{ github.run_number }}.zip *.app
-          cd ../../../../..
+          zip -r "../../../../outputs/artifacts/${{ env.APP_NAME }}-macos-v1.0.0+${{ github.run_number }}.zip" *.app
 
       - name: 📤 上传工件
         uses: actions/upload-artifact@v4
@@ -225,13 +211,8 @@ jobs:
           path: build/outputs/artifacts/*.zip
           retention-days: 30
 
-      - name: ✅ 输出构建信息
-        run: |
-          echo "✅ macOS 桌面构建完成"
-          ls -lh build/outputs/artifacts/
-
   # ============================
-  # 5. Linux 桌面构建
+  # 5. Linux 便携包
   # ============================
   build-linux:
     name: 🐧 Linux 安装包
@@ -262,15 +243,15 @@ jobs:
         run: flutter pub get
 
       - name: 🔨 构建 Linux (Release)
-        run: |
-          flutter build linux --release
+        run: flutter build linux --release
 
-      - name: 📋 创建便携包 .tar.gz
+      - name: 📋 打包产物
         run: |
           mkdir -p build/outputs/artifacts
+          # 从 build/linux/x64/release/bundle/ 打包
+          # 路径: build/linux/x64/release → ../../../outputs = build/outputs
           cd build/linux/x64/release
-          tar -czf ../../../../outputs/artifacts/${APP_NAME}-linux-portable-v1.0.0+${{ github.run_number }}.tar.gz bundle/
-          cd ../../../..
+          tar -czf "../../../outputs/artifacts/${{ env.APP_NAME }}-linux-portable-v1.0.0+${{ github.run_number }}.tar.gz" bundle/
 
       - name: 📤 上传工件
         uses: actions/upload-artifact@v4
@@ -279,60 +260,8 @@ jobs:
           path: build/outputs/artifacts/*.tar.gz
           retention-days: 30
 
-      - name: ✅ 输出构建信息
-        run: |
-          echo "✅ Linux 构建完成"
-          ls -lh build/outputs/artifacts/
-
-  # ============================
-  # 6. Flutter Web 构建
-  # ============================
-  build-web:
-    name: 🌐 Flutter Web
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: 📥 检出代码
-        uses: actions/checkout@v4
-
-      - name: 🔧 安装 Flutter SDK
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: "stable"
-          cache: true
-
-      - name: 📦 安装依赖
-        run: flutter pub get
-
-      - name: 🔨 构建 Web
-        run: |
-          flutter build web \
-            --release \
-            --base-href "/Crush-the-FQ/"
-
-      - name: 📋 创建 Web 部署包
-        run: |
-          mkdir -p build/outputs/artifacts
-          cd build/web
-          zip -r ../outputs/artifacts/${APP_NAME}-web-v1.0.0+${{ github.run_number }}.zip .
-          cd ../..
-
-      - name: 📤 上传工件
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-app
-          path: build/outputs/artifacts/*.zip
-          retention-days: 30
-
-      - name: ✅ 输出构建信息
-        run: |
-          echo "✅ Flutter Web 构建完成"
-          ls -lh build/outputs/artifacts/
-
   # ===========================================================================
-  # 7. 自动发布 GitHub Release（仅 main 分支 push 触发）
+  # 6. 自动发布 GitHub Release
   # ===========================================================================
   create-release:
     name: 📦 创建 GitHub Release
@@ -343,14 +272,10 @@ jobs:
       - build-windows
       - build-macos
       - build-linux
-      - build-web
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     timeout-minutes: 15
 
     steps:
-      - name: 📥 检出代码
-        uses: actions/checkout@v4
-
       - name: ⬇️ 下载 Android 工件
         uses: actions/download-artifact@v4
         with:
@@ -381,21 +306,12 @@ jobs:
           name: linux-app
           path: release-artifacts/linux
 
-      - name: ⬇️ 下载 Web 工件
-        uses: actions/download-artifact@v4
-        with:
-          name: web-app
-          path: release-artifacts/web
-
       - name: 📋 列出所有产物
-        run: |
-          echo "=== 所有构建产物 ==="
-          find release-artifacts -type f -exec ls -lh {} \;
+        run: find release-artifacts -type f -exec ls -lh {} \;
 
       - name: 🏷️ 生成版本标签
         id: tag
         run: |
-          # 使用语义化版本 + GitHub Run Number 保证唯一
           TAG="v1.0.${{ github.run_number }}"
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
           echo "Release Tag: ${TAG}"
@@ -419,12 +335,12 @@ jobs:
             | 🪟 Windows | `.zip` (便携包) | 解压即用 |
             | 🍏 macOS | `.zip` (.app) | macOS 桌面应用 |
             | 🐧 Linux | `.tar.gz` (便携包) | 解压即用 |
-            | 🌐 Web | `.zip` | 静态部署包 |
+
+            > 🌐 Web 平台请使用仓库根目录的 `index.html`（原生 HTML 手势识别网页）。
 
             ## 🔧 构建信息
             - 构建编号: #${{ github.run_number }}
             - 提交哈希: ${{ github.sha }}
-            - 构建时间: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           files: |
             release-artifacts/android/*.apk
@@ -432,14 +348,6 @@ jobs:
             release-artifacts/windows/*.zip
             release-artifacts/macos/*.zip
             release-artifacts/linux/*.tar.gz
-            release-artifacts/web/*.zip
           draft: false
           prerelease: false
           generate_release_notes: true
-
-      - name: ✅ 发布完成
-        run: |
-          echo "============================================"
-          echo "  🎉 Release ${{ steps.tag.outputs.tag }} 发布成功！"
-          echo "  所有平台安装包已上传至 Release 附件区"
-          echo "============================================"
