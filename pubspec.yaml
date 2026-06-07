@@ -1,0 +1,32 @@
+name: crush_the_fq
+description: "捏爆马虫 - 3D手势找不同 (Flutter 原生重构版)"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  # 摄像头访问
+  camera: ^0.11.1
+  # 离线手势识别 —— 基于 TFLite，模型内置，纯离线（Android/iOS/macOS/Windows/Linux）
+  hand_detection: ^3.1.0
+  # 权限管理
+  permission_handler: ^11.3.1
+  # 3D 向量/矩阵运算（Flutter 内置 vector_math，显式声明便于维护）
+  vector_math: ^2.1.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  # 离线资源目录（手势模型等离线资源）
+  assets:
+    - assets/models/
