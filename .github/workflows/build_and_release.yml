@@ -21,7 +21,7 @@ on:
 
 # ---------- 全局环境变量 ----------
 env:
-  FLUTTER_VERSION: "3.32.7" # 使用当前最新稳定版
+  FLUTTER_VERSION: "3.44.1" # 匹配本地开发环境（Flutter 3.44.1 / Dart 3.12.1）
   APP_NAME: "crush_the_fq"
   RELEASE_TITLE: 'Flutter 重构版 - 捏爆"马虫"'
   RELEASE_BODY: "使用 Flutter 重构"
@@ -350,18 +350,6 @@ jobs:
     steps:
       - name: 📥 检出代码
         uses: actions/checkout@v4
-
-      - name: 🗑️ 清理旧工件（同名）
-        uses: actions/delete-artifacts@v1
-        continue-on-error: true
-        with:
-          name: |
-            android-apk
-            ios-app
-            windows-app
-            macos-app
-            linux-app
-            web-app
 
       - name: ⬇️ 下载 Android 工件
         uses: actions/download-artifact@v4
