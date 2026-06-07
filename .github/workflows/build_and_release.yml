@@ -51,7 +51,7 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: "stable"
-          cache: true
+          cache: false
 
       - name: 📦 安装依赖
         run: flutter pub get
@@ -94,10 +94,13 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: "stable"
-          cache: true
+          cache: false
 
       - name: 📦 安装依赖
         run: flutter pub get
+
+      - name: 🧹 清理 SPM 缓存
+        run: rm -rf ~/Library/Caches/org.swift.swiftpm
 
       - name: 🔨 构建 iOS (无签名)
         run: |
@@ -137,7 +140,7 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: "stable"
-          cache: true
+          cache: false
 
       - name: 📦 安装依赖
         run: flutter pub get
@@ -190,7 +193,7 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: "stable"
-          cache: true
+          cache: false
 
       - name: 📦 安装依赖
         run: flutter pub get
@@ -228,7 +231,7 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: "stable"
-          cache: true
+          cache: false
 
       - name: 📦 安装 Linux 编译依赖
         run: |

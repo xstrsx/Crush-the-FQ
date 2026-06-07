@@ -32,15 +32,11 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
-# Fix: VS 2022+ (MSVC 14.5x) STL rejects <experimental/coroutine> with a hard
-# static_assert (STL1011). The deprecated /await TS and experimental headers are
-# superseded by C++20 <coroutine>. The permission_handler_windows plugin (and
-# potentially others) still pull in the old header.
-# Solution: /std:c++20 enables standard coroutines; the _SILENCE_ define suppresses
-# the STL1011 assertion for any code that still #includes the experimental header.
+# Fix: VS 2022+ STL rejects <experimental/coroutine> (STL1011).
+# Permission_handler_windows and other plugins still include the deprecated header.
+# /std:c++20 → standard coroutines; _SILENCE_ → suppress the static_assert.
 if(MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++20 /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS")
-  string(REPLACE "/await" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 endif()
 
 # Compilation settings that should be applied to most targets.
