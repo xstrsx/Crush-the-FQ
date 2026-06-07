@@ -32,11 +32,14 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
-# Fix: hand_detection → opencv_dart requires C++20 coroutines on VS 2022+.
-# The STL no longer supports the deprecated /await flag; /std:c++latest enables
-# the standard <coroutine> header that the native plugin code depends on.
+# Fix: hand_detection → opencv_dart C++ native code uses standard <coroutine>.
+# VS 2022+ STL rejects the deprecated /await TS; /std:c++20 enables C++20 coroutines.
+# Use CMAKE_CXX_FLAGS (global) instead of add_compile_options (directory-scoped)
+# to ensure the flag reaches all plugin subdirectories added by generated_plugins.cmake.
 if(MSVC)
-  add_compile_options(/std:c++latest /await:false)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++20")
+  # Strip any stale /await that a plugin might inject — it conflicts with /std:c++20
+  string(REPLACE "/await" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 endif()
 
 # Compilation settings that should be applied to most targets.
