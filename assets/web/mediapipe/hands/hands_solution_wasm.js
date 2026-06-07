@@ -1,0 +1,1 @@
+Couldn't find the requested file /hands_solution_pipeline_wasm_internal.js in @mediapipe/hands.

@@ -1,32 +1,31 @@
 # 💥 捏爆"马虫" — 3D 手势找不同
 
-隔空用手势操控，在一堆"冯强"方块中找出"马虫"并**握拳捏爆**。
-
----
+隔空手势操控，在一堆"冯强"方块中找出"马虫"并**握拳捏爆**。
 
 ## 🎮 玩法
 
-1. **张开手掌** — 移动光标瞄准方块
-2. **握拳** — 捏爆选中目标
-
-选错 → 方块弹飞变红。选对 → 方块膨胀、撑破、炫彩粒子炸裂，自动进入下一关。
+张开手掌移动光标 → 对准目标 → 握拳捏爆。选错弹飞，选对膨胀爆炸 + 炫彩粒子 + 自动下一关。
 
 ## 🖥️ 平台
 
-Android · iOS · Windows · macOS · Linux
-
-> Web 版使用根目录 `index.html`（原生 Three.js + MediaPipe）
-
-## 🛠️ 技术实现
-
-| 模块 | 方案 |
+| 平台 | 技术 |
 |------|------|
-| 手势识别 | `hand_detection` — TFLite 离线推理，21 关键点 + 握拳/张开/点赞等 7 种手势，模型内置安装包 |
-| 3D 渲染 | 自研 `CustomPainter` 软渲染器 — 透视投影、背面剔除、逐面光照、深度排序、雾效 |
-| 物理引擎 | 自研刚体动力学 — 重力、地面/墙体 AABB 碰撞、四元数旋转、线性/角阻尼 |
-| 粒子系统 | 80 粒子球面散开、7 色霓虹渐变、重力衰减、透明度淡出 |
-| 纹理 | `dart:ui` Canvas 离屏渲染 — 纯代码生成"冯强"/"马虫"方块贴图 |
-| 摄像头 | `camera` 插件 — 前置摄像头 640×480 实时取景 |
+| Android | WebView |
+| iOS | WKWebView |
+| Windows | WebView2 |
+| macOS | WKWebView |
+| Web | 根目录 `index.html` |
+
+## 🛠️ 架构
+
+```
+Flutter App
+  └── 本地 HTTP 服务器 (dart:io)
+        └── 离线 index.html + three.js + cannon-es + MediaPipe Hands
+              └── WebView (全屏原生容器)
+```
+
+所有 JS 库和 AI 模型文件均打包在 `assets/web/` 中，安装后无需任何网络访问。
 
 ## 🚀 运行
 
@@ -34,12 +33,6 @@ Android · iOS · Windows · macOS · Linux
 flutter pub get
 flutter run
 ```
-
-## ⚠️ 注意
-
-- 需授予摄像头权限
-- Web 摄像头仅 HTTPS / localhost 可用
-- iOS 真机需开发者签名
 
 ## 📄 License
 

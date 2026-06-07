@@ -1,356 +1,149 @@
-# =============================================================================
-# 捏爆"马虫" - Flutter 全平台自动构建 + GitHub Release 发布流水线
-# =============================================================================
-# 触发条件：向 main 分支推送代码或合并 PR 后自动触发
-# 构建目标：Android / iOS / Windows / macOS / Linux (5 平台)
-# 注意：Web 平台因 hand_detection 包不支持 web 而移除，原 index.html 替代
-# 产物处理：上传至工件 → 自动创建 GitHub Release 并附加所有包
-# =============================================================================
-
 name: 🚀 全平台构建 & 自动发布
 
-# ---------- 触发规则 ----------
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
-# ---------- 全局环境变量 ----------
 env:
   FLUTTER_VERSION: "3.44.1"
   APP_NAME: "crush_the_fq"
   RELEASE_TITLE: 'Flutter 重构版 - 捏爆"马虫"'
-  RELEASE_BODY: "使用 Flutter 重构"
+  RELEASE_BODY: "使用 Flutter WebView 离线嵌套原 HTML 手势识别网页"
 
-# ---------- 权限配置 ----------
 permissions:
   contents: write
   actions: read
-  pull-requests: read
 
-# =============================================================================
 jobs:
   # ============================
   # 1. Android APK
   # ============================
   build-android:
-    name: 🤖 Android APK
+    name: 🤖 Android
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 25
     steps:
-      - name: 📥 检出代码
-        uses: actions/checkout@v4
-
-      - name: 🔧 安装 Flutter SDK
-        uses: subosito/flutter-action@v2
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: "stable"
+          channel: stable
           cache: false
-
-      - name: 📦 安装依赖
-        run: flutter pub get
-
-      - name: 🔨 构建 Android APK (Release)
-        run: |
-          flutter build apk \
-            --release \
+      - run: flutter pub get
+      - run: |
+          flutter build apk --release \
             --target-platform android-arm64,android-arm,android-x64 \
-            --build-name=1.0.0 \
-            --build-number=${{ github.run_number }}
-
-      - name: 📋 重命名产物
-        run: |
+            --build-name=1.0.0 --build-number=${{ github.run_number }}
+      - run: |
           mkdir -p build/outputs/artifacts
           cp build/app/outputs/flutter-apk/app-release.apk \
-             "build/outputs/artifacts/${{ env.APP_NAME }}-android-v1.0.0+${{ github.run_number }}.apk"
-
-      - name: 📤 上传工件
-        uses: actions/upload-artifact@v4
+            "build/outputs/artifacts/${{ env.APP_NAME }}-android.apk"
+      - uses: actions/upload-artifact@v4
         with:
           name: android-apk
           path: build/outputs/artifacts/*.apk
           retention-days: 30
 
   # ============================
-  # 2. iOS App (未签名)
+  # 2. iOS
   # ============================
   build-ios:
-    name: 🍎 iOS App
+    name: 🍎 iOS
     runs-on: macos-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 25
     steps:
-      - name: 📥 检出代码
-        uses: actions/checkout@v4
-
-      - name: 🔧 安装 Flutter SDK
-        uses: subosito/flutter-action@v2
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: "stable"
+          channel: stable
           cache: false
-
-      - name: 📦 安装依赖
-        run: flutter pub get
-
-      - name: 🧹 清理 SPM 缓存
-        run: rm -rf ~/Library/Caches/org.swift.swiftpm
-
-      - name: 🔨 构建 iOS (无签名)
-        run: |
-          flutter build ios \
-            --release \
-            --no-codesign \
-            --build-name=1.0.0 \
-            --build-number=${{ github.run_number }}
-
-      - name: 📋 打包产物
-        run: |
+      - run: flutter pub get
+      - run: |
+          flutter build ios --release --no-codesign \
+            --build-name=1.0.0 --build-number=${{ github.run_number }}
+      - run: |
           mkdir -p build/outputs/artifacts
           cd build/ios/iphoneos
-          zip -r "../../outputs/artifacts/${{ env.APP_NAME }}-ios-v1.0.0+${{ github.run_number }}.zip" Runner.app
-
-      - name: 📤 上传工件
-        uses: actions/upload-artifact@v4
+          zip -r "../../outputs/artifacts/${{ env.APP_NAME }}-ios.zip" Runner.app
+      - uses: actions/upload-artifact@v4
         with:
           name: ios-app
           path: build/outputs/artifacts/*.zip
           retention-days: 30
 
   # ============================
-  # 3. Windows 便携包
-  # ============================
-  build-windows:
-    name: 🪟 Windows 安装包
-    runs-on: windows-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: 📥 检出代码
-        uses: actions/checkout@v4
-
-      - name: 🔧 安装 Flutter SDK
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: "stable"
-          cache: false
-
-      - name: 📦 安装依赖
-        run: flutter pub get
-
-      - name: 🔨 构建 Windows (Release)
-        run: flutter build windows --release
-
-      - name: 📋 收集产物
-        shell: pwsh
-        run: |
-          $artifactsDir = "build/outputs/artifacts"
-          New-Item -ItemType Directory -Force -Path $artifactsDir
-
-          $appName = "${{ env.APP_NAME }}"
-          $runNumber = "${{ github.run_number }}"
-          $zipName = "${appName}-windows-portable-v1.0.0+${runNumber}.zip"
-          $zipPath = Join-Path $artifactsDir $zipName
-          $sourcePath = "build/windows/x64/runner/Release/*"
-
-          Write-Host "打包 Windows 产物..."
-          Write-Host "  源目录: $sourcePath"
-          Write-Host "  目标文件: $zipPath"
-
-          Compress-Archive -Path $sourcePath -DestinationPath $zipPath
-
-          Write-Host "产物列表:"
-          Get-ChildItem $artifactsDir | Format-Table Name, Length
-
-      - name: 📤 上传工件
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-app
-          path: build/outputs/artifacts/*.zip
-          retention-days: 30
-
-  # ============================
-  # 4. macOS 桌面
+  # 3. macOS 桌面
   # ============================
   build-macos:
-    name: 🍏 macOS DMG
+    name: 🍏 macOS
     runs-on: macos-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 25
     steps:
-      - name: 📥 检出代码
-        uses: actions/checkout@v4
-
-      - name: 🔧 安装 Flutter SDK
-        uses: subosito/flutter-action@v2
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: "stable"
+          channel: stable
           cache: false
-
-      - name: 📦 安装依赖
-        run: flutter pub get
-
-      - name: 🔨 构建 macOS
-        run: flutter build macos --release
-
-      - name: 📋 打包产物
-        run: |
+      - run: flutter pub get
+      - run: flutter build macos --release
+      - run: |
           mkdir -p build/outputs/artifacts
           cd build/macos/Build/Products/Release
-          zip -r "../../../../outputs/artifacts/${{ env.APP_NAME }}-macos-v1.0.0+${{ github.run_number }}.zip" *.app
-
-      - name: 📤 上传工件
-        uses: actions/upload-artifact@v4
+          zip -r "../../../../outputs/artifacts/${{ env.APP_NAME }}-macos.zip" *.app
+      - uses: actions/upload-artifact@v4
         with:
           name: macos-app
           path: build/outputs/artifacts/*.zip
           retention-days: 30
 
   # ============================
-  # 5. Linux 便携包
+  # 4. 自动 Release
   # ============================
-  build-linux:
-    name: 🐧 Linux 安装包
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: 📥 检出代码
-        uses: actions/checkout@v4
-
-      - name: 🔧 安装 Flutter SDK
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: "stable"
-          cache: false
-
-      - name: 📦 安装 Linux 编译依赖
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            cmake clang pkg-config libgtk-3-dev \
-            liblzma-dev ninja-build \
-            libblkid-dev libmount-dev libselinux1-dev \
-            libpcre2-dev zlib1g-dev
-
-      - name: 📦 安装 Flutter 依赖
-        run: flutter pub get
-
-      - name: 🔨 构建 Linux (Release)
-        run: flutter build linux --release
-
-      - name: 📋 打包产物
-        run: |
-          mkdir -p build/outputs/artifacts
-          # 从 build/linux/x64/release/bundle/ 打包
-          # 路径: build/linux/x64/release → ../../../outputs = build/outputs
-          cd build/linux/x64/release
-          tar -czf "../../../outputs/artifacts/${{ env.APP_NAME }}-linux-portable-v1.0.0+${{ github.run_number }}.tar.gz" bundle/
-
-      - name: 📤 上传工件
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-app
-          path: build/outputs/artifacts/*.tar.gz
-          retention-days: 30
-
-  # ===========================================================================
-  # 6. 自动发布 GitHub Release
-  # ===========================================================================
   create-release:
-    name: 📦 创建 GitHub Release
+    name: 📦 Release
     runs-on: ubuntu-latest
-    needs:
-      - build-android
-      - build-ios
-      - build-windows
-      - build-macos
-      - build-linux
+    needs: [build-android, build-ios, build-macos]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    timeout-minutes: 15
-
     steps:
-      - name: ⬇️ 下载 Android 工件
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: android-apk
-          path: release-artifacts/android
-
-      - name: ⬇️ 下载 iOS 工件
-        uses: actions/download-artifact@v4
+          path: artifacts/android
+      - uses: actions/download-artifact@v4
         with:
           name: ios-app
-          path: release-artifacts/ios
-
-      - name: ⬇️ 下载 Windows 工件
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-app
-          path: release-artifacts/windows
-
-      - name: ⬇️ 下载 macOS 工件
-        uses: actions/download-artifact@v4
+          path: artifacts/ios
+      - uses: actions/download-artifact@v4
         with:
           name: macos-app
-          path: release-artifacts/macos
+          path: artifacts/macos
 
-      - name: ⬇️ 下载 Linux 工件
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-app
-          path: release-artifacts/linux
-
-      - name: 📋 列出所有产物
-        run: find release-artifacts -type f -exec ls -lh {} \;
-
-      - name: 🏷️ 生成版本标签
-        id: tag
+      - id: tag
         run: |
           TAG="v1.0.${{ github.run_number }}"
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "Release Tag: ${TAG}"
 
-      - name: 🚀 创建 GitHub Release 并上传附件
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: "${{ env.RELEASE_TITLE }} ${{ steps.tag.outputs.tag }}"
           body: |
             ${{ env.RELEASE_BODY }}
 
-            ---
+            | 平台 | 格式 | 说明 |
+            |------|------|------|
+            | 🤖 Android | .apk | 正式发行版 |
+            | 🍎 iOS | .zip (.app) | 需签名后安装 |
+            | 🍏 macOS | .zip (.app) | 桌面应用 |
 
-            ## 📦 包含的安装包
-
-            | 平台 | 文件类型 | 说明 |
-            |------|---------|------|
-            | 🤖 Android | `.apk` | 正式发行版，可直接安装 |
-            | 🍎 iOS | `.zip` (.app) | 需使用签名工具签署后安装 |
-            | 🪟 Windows | `.zip` (便携包) | 解压即用 |
-            | 🍏 macOS | `.zip` (.app) | macOS 桌面应用 |
-            | 🐧 Linux | `.tar.gz` (便携包) | 解压即用 |
-
-            > 🌐 Web 平台请使用仓库根目录的 `index.html`（原生 HTML 手势识别网页）。
-
-            ## 🔧 构建信息
-            - 构建编号: #${{ github.run_number }}
-            - 提交哈希: ${{ github.sha }}
-
+            > 🪟 Windows 和 🌐 Web 使用根目录 `index.html`（浏览器即可运行）。
           files: |
-            release-artifacts/android/*.apk
-            release-artifacts/ios/*.zip
-            release-artifacts/windows/*.zip
-            release-artifacts/macos/*.zip
-            release-artifacts/linux/*.tar.gz
-          draft: false
-          prerelease: false
+            artifacts/android/*.apk
+            artifacts/ios/*.zip
+            artifacts/macos/*.zip
           generate_release_notes: true
