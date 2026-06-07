@@ -377,7 +377,7 @@
       "name": "crush_the_fq",
       "rootUri": "../",
       "packageUri": "lib/",
-      "languageVersion": "3.12"
+      "languageVersion": "3.8"
     }
   ],
   "generator": "pub",
